@@ -13,7 +13,9 @@ rv-brand = "Morphe"
 [YouTube]
 apkmirror-dlurl = "https://www.apkmirror.com/apk/google-inc/youtube"
 arch = "arm64-v8a"
+build-mode = "module"
 
 [YouTube-Music]
 apkmirror-dlurl = "https://www.apkmirror.com/apk/google-inc/youtube-music"
 arch = "arm64-v8a"
+build-mode = "module"
