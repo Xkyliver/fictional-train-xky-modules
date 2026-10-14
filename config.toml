@@ -14,14 +14,14 @@ rv-brand = "Morphe"
 apkmirror-dlurl = "https://www.apkmirror.com/apk/google-inc/youtube"
 arch = "arm64-v8a"
 build-mode = "module"
-excluded-patches = [
-    "Custom branding"
-]
+excluded-patches = """\
+  'Custom branding'
+  """
 
 [YouTube-Music]
 apkmirror-dlurl = "https://www.apkmirror.com/apk/google-inc/youtube-music"
 arch = "arm64-v8a"
 build-mode = "module"
-excluded-patches = [
-    "Custom branding"
-]
+excluded-patches = """\
+  'Custom branding'
+  """
