@@ -90,7 +90,7 @@ get_prebuilts() {
 		if [ "$ver" = "dev" ]; then
 			local resp
 			resp=$(gh_req "$rv_rel" -) || return 1
-			ver=$(jq -e -r '.[] | .tag_name' <<<"$resp" | get_lowest_ver) || return 1
+			ver=$(jq -e -r '.[] | .tag_name' <<<"$resp" | get_highest_ver) || return 1
 		fi
 		if [ "$ver" = "latest" ]; then
 			rv_rel+="/latest"
@@ -271,7 +271,7 @@ gh_dl() {
 }
 
 log() { echo -e "$1  " >>"build.md"; }
-get_lowest_ver() {
+get_highest_ver() {
 	local vers m
 	vers=$(tee)
 	m=$(head -1 <<<"$vers")
@@ -299,7 +299,7 @@ get_patch_last_supported_ver() {
 		done <<<"$(list_args "$inc_sel")"
 		vers=$(awk '{$1=$1}1' <<<"$vers")
 		if [ "$vers" ]; then
-			get_lowest_ver <<<"$vers"
+			get_highest_ver <<<"$vers"
 			return
 		fi
 	fi
@@ -310,7 +310,7 @@ get_patch_last_supported_ver() {
 	elif [ "$op" = "Any" ]; then
 		return
 	fi
-	get_lowest_ver <<<"$op" || return 1
+	get_highest_ver <<<"$op" || return 1
 }
 
 patches_list_versions() {
@@ -643,7 +643,7 @@ build_rv() {
 	fi
 	if [ $get_latest_ver = "true" ]; then
 		pkgvers=$(get_"${dl_from}"_vers)
-		version=$(get_lowest_ver <<<"$pkgvers") || version=$(head -1 <<<"$pkgvers")
+		version=$(get_highest_ver <<<"$pkgvers") || version=$(head -1 <<<"$pkgvers")
 	fi
 	if [ -z "$version" ]; then
 		epr "empty version, not building ${table}."
