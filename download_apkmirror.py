@@ -130,7 +130,7 @@ def find_version_page(scraper, base_url: str, version: str):
     v_trim = '.'.join(v_parts[:3]) if len(v_parts) > 3 else None
     v_trim_slug = sanitize_version(v_trim) if v_trim else None
     v_trim_compact = compact_version(v_trim) if v_trim else None
-    
+
     title_slug = None
     # 1. Base listing page (most reliable & avoids guessing)
     r = safe_get(scraper, base_url)
@@ -145,10 +145,9 @@ def find_version_page(scraper, base_url: str, version: str):
             href = a["href"]
             if is_version_match(href, v_slug, v_compact) or (v_trim_slug and is_version_match(href, v_trim_slug, v_trim_compact)):
                 matching_links.append(href)
-        
-        # Sort candidates: prefer those containing '-release' and matching exact slug
+
         matching_links.sort(key=lambda h: (1 if "-release" in h.lower() else 0, 1 if v_slug in h.lower() else 0), reverse=True)
-        
+
         for href in matching_links[:5]:
             full_url = "https://www.apkmirror.com" + href if href.startswith("/") else href
             r2 = safe_get(scraper, full_url, referer=base_url)
@@ -167,8 +166,7 @@ def find_version_page(scraper, base_url: str, version: str):
     candidates.append(f"{base_url.rstrip('/')}/{v_slug}-release/")
     if v_trim_slug:
         candidates.append(f"{base_url.rstrip('/')}/{v_trim_slug}-release/")
-    
-    # Non -release fallbacks
+
     if title_slug:
         candidates.append(f"{base_url.rstrip('/')}/{title_slug}-{v_slug}/")
         if v_trim_slug:
@@ -206,11 +204,56 @@ def find_version_page(scraper, base_url: str, version: str):
 
     raise Exception(f"Could not find APKMirror page for version '{version}' at {base_url}")
 
+def parse_size_to_mb(size_text: str) -> float:
+    """Parse a size string like '123.4 MB', '45 KB', '1.2 GB' into MB."""
+    m = re.match(r'^([\d.]+)\s*(KB|MB|GB)$', size_text.strip(), re.I)
+    if not m:
+        return float("inf")
+    val = float(m.group(1))
+    unit = m.group(2).upper()
+    if unit == "KB":
+        val /= 1024
+    elif unit == "GB":
+        val *= 1024
+    return val
+
+def get_variant_size_mb(scraper, variant_url: str, version_url: str) -> float:
+    """
+    Fetch the variant page and extract its file size.
+    APKMirror shows size in a <div class="table-row"> spec block with
+    a label 'File size' and a value like '123.4 MB'.
+    Falls back to scanning all text nodes for a size pattern.
+    """
+    try:
+        r = safe_get(scraper, variant_url, referer=version_url)
+        if not r or r.status_code != 200:
+            return float("inf")
+        soup = BeautifulSoup(r.content, "html.parser")
+
+        # Primary: look for spec rows with "File size" label
+        for row in soup.find_all("div", {"class": re.compile(r"table-row")}):
+            cells = row.find_all("div", {"class": re.compile(r"table-cell")})
+            if len(cells) >= 2:
+                label = cells[0].get_text(strip=True).lower()
+                if "file size" in label or "size" == label:
+                    return parse_size_to_mb(cells[1].get_text(strip=True))
+
+        # Fallback: any span/div whose text looks like a file size
+        for tag in soup.find_all(["span", "div", "p"]):
+            txt = tag.get_text(strip=True)
+            if re.match(r'^[\d.]+\s*(KB|MB|GB)$', txt, re.I):
+                sz = parse_size_to_mb(txt)
+                if sz < float("inf"):
+                    return sz
+    except Exception as e:
+        print(f"  Could not get size for {variant_url}: {e}", file=sys.stderr)
+    return float("inf")
+
 def download_file(scraper, direct_url: str, referer: str, out_path: str):
     dir_name = os.path.dirname(out_path)
     if dir_name:
         os.makedirs(dir_name, exist_ok=True)
-    
+
     headers = {"Referer": referer}
     print(f"Downloading from {direct_url} -> {out_path}", file=sys.stderr)
     with scraper.get(direct_url, stream=True, headers=headers) as r:
@@ -223,17 +266,17 @@ def download_file(scraper, direct_url: str, referer: str, out_path: str):
 
 def download_apkmirror(base_url: str, version: str, output: str, arch: str = "all", dpi: str = ""):
     scraper = get_scraper()
-    
+
     version_url, resp = find_version_page(scraper, base_url, version)
     print(f"Found version page: {version_url}", file=sys.stderr)
-    
+
     soup = BeautifulSoup(resp.content, "html.parser")
     raw_variants = []
-    
+
     table = soup.find("div", {"class": ["table", "variants-table"]})
     if not table:
         table = soup.find("div", {"class": re.compile(r"variants-table")})
-    
+
     if table:
         rows = table.find_all("div", {"class": re.compile(r"table-row")})
         if not rows:
@@ -242,33 +285,33 @@ def download_apkmirror(base_url: str, version: str, output: str, arch: str = "al
             cells = row.find_all("div", {"class": "table-cell"}, recursive=False)
             if not cells:
                 continue
-            
+
             link_el = row.find("a", href=re.compile(r"-apk-download/?$")) or row.find("a", {"class": "accent_color"})
             if not link_el or not link_el.get("href"):
                 continue
-            
+
             href = link_el["href"].strip()
             if href.startswith("#") or "all_versions" in href or "variant-" in href:
                 continue
-            
+
             badge = row.find("span", {"class": re.compile(r"apkm-badge")})
             badge_text = badge.text.strip().upper() if badge else ""
             is_bundle = ("BUNDLE" in badge_text) or ("bundle" in href.lower())
-            
+
             variant_arch = "universal"
             for c in cells:
                 c_text = c.get_text(strip=True).lower()
                 if any(a in c_text for a in ("arm64-v8a", "armeabi-v7a", "arm", "x86_64", "x86", "universal", "noarch")):
                     variant_arch = c_text
                     break
-            
+
             variant_url = "https://www.apkmirror.com" + href if href.startswith("/") else href
             raw_variants.append({
                 "is_bundle": is_bundle,
                 "url": variant_url,
                 "arch": variant_arch
             })
-    
+
     # Fallback: check all -apk-download links directly on page
     if not raw_variants:
         for a in soup.find_all("a", href=re.compile(r"-apk-download/?$")):
@@ -280,7 +323,7 @@ def download_apkmirror(base_url: str, version: str, output: str, arch: str = "al
                     "url": variant_url,
                     "arch": "universal"
                 })
-    
+
     # If no variants in table, check if page itself has downloadButton
     if not raw_variants:
         dl_btn = soup.find("a", {"class": re.compile(r"downloadButton")})
@@ -293,31 +336,37 @@ def download_apkmirror(base_url: str, version: str, output: str, arch: str = "al
                     "url": variant_url,
                     "arch": "universal"
                 })
-    
+
     if not raw_variants:
         raise Exception(f"No variants found for {version}")
-    
-    # Sort variants by priority
-    target_arch = arch.lower() if arch else "all"
-    v_parts = version.split('.')
-    sub_ver = v_parts[-1] if len(v_parts) > 3 else ""
-    
-    def variant_score(v):
-        score = 0
-        if v["is_bundle"]:
-            score += 10
-        if target_arch in ("all", "both"):
-            score += 10
-        elif target_arch in v["arch"]:
-            score += 50
-        elif "universal" in v["arch"] or "noarch" in v["arch"]:
-            score += 25
-        if sub_ver and sub_ver in v["url"]:
-            score += 100
-        return score
 
-    ordered_variants = sorted(raw_variants, key=variant_score, reverse=True)
-    
+    # --- Filter by arch first, then sort by smallest file size ---
+    target_arch = arch.lower() if arch else "all"
+
+    def arch_matches(v: dict) -> bool:
+        if target_arch in ("all", "both"):
+            return True
+        va = v["arch"].lower()
+        return target_arch in va or "universal" in va or "noarch" in va
+
+    arch_filtered = [v for v in raw_variants if arch_matches(v)]
+    if not arch_filtered:
+        print("  No variants matched requested arch, falling back to all variants", file=sys.stderr)
+        arch_filtered = raw_variants
+
+    # Fetch file sizes for all arch-matching candidates
+    print(f"Fetching sizes for {len(arch_filtered)} arch-matching variant(s)...", file=sys.stderr)
+    sized_variants = []
+    for v in arch_filtered:
+        sz = get_variant_size_mb(scraper, v["url"], version_url)
+        print(f"  arch={v['arch']:20s}  bundle={v['is_bundle']}  size={sz:.1f} MB  url={v['url']}", file=sys.stderr)
+        sized_variants.append((sz, v))
+
+    # Sort: smallest first; among equal sizes prefer non-bundle (simpler to handle)
+    sized_variants.sort(key=lambda x: (x[0], x[1]["is_bundle"]))
+    ordered_variants = [v for _, v in sized_variants]
+
+    # --- Download loop (unchanged logic, now operating on size-sorted list) ---
     last_err = None
     for idx, selected in enumerate(ordered_variants):
         print(f"Trying variant {idx+1}/{len(ordered_variants)} (bundle={selected['is_bundle']}, arch={selected['arch']}): {selected['url']}", file=sys.stderr)
@@ -326,21 +375,21 @@ def download_apkmirror(base_url: str, version: str, output: str, arch: str = "al
             if not r_variant or r_variant.status_code != 200:
                 print(f"  Variant page returned {getattr(r_variant, 'status_code', None)}, skipping", file=sys.stderr)
                 continue
-            
+
             soup_var = BeautifulSoup(r_variant.content, "html.parser")
             dl_btn = soup_var.find("a", {"class": re.compile(r"downloadButton")})
             if not dl_btn or not dl_btn.get("href"):
                 print("  Download button not found, skipping", file=sys.stderr)
                 continue
-            
+
             dl_page_href = dl_btn["href"].strip()
             dl_page_url = "https://www.apkmirror.com" + dl_page_href if dl_page_href.startswith("/") else dl_page_href
-            
+
             r_dl = safe_get(scraper, dl_page_url, referer=selected["url"])
             if not r_dl or r_dl.status_code != 200:
                 print(f"  Download page returned {getattr(r_dl, 'status_code', None)}, skipping", file=sys.stderr)
                 continue
-            
+
             soup_dl = BeautifulSoup(r_dl.content, "html.parser")
             direct_link = soup_dl.find("a", href=re.compile(r"download\.php"))
             if not direct_link:
@@ -352,15 +401,15 @@ def download_apkmirror(base_url: str, version: str, output: str, arch: str = "al
             if not direct_link or not direct_link.get("href"):
                 print("  Direct link not found on download page, skipping", file=sys.stderr)
                 continue
-            
+
             direct_href = direct_link["href"].strip()
             direct_url = "https://www.apkmirror.com" + direct_href if direct_href.startswith("/") else direct_href
-            
+
             actual_output = output
             if selected["is_bundle"]:
                 if not actual_output.endswith(".apkm"):
                     actual_output = f"{output}.apkm"
-            
+
             download_file(scraper, direct_url, dl_page_url, actual_output)
             print(actual_output)
             return actual_output
@@ -368,7 +417,7 @@ def download_apkmirror(base_url: str, version: str, output: str, arch: str = "al
             last_err = e
             print(f"  Variant attempt encountered error: {e}", file=sys.stderr)
             continue
-            
+
     raise Exception(f"All variants failed for {version}. Last error: {last_err}")
 
 if __name__ == "__main__":
@@ -380,10 +429,10 @@ if __name__ == "__main__":
     parser.add_argument("dpi", nargs="?", default="", help="Target DPI")
     parser.add_argument("--pkg-name", dest="pkg_url", help="Get package name for URL")
     parser.add_argument("--versions", dest="versions_url", help="Get version list for URL")
-    
+
     args = parser.parse_args()
     scraper = get_scraper()
-    
+
     if args.pkg_url:
         print(get_pkg_name(scraper, args.pkg_url))
         sys.exit(0)
@@ -391,11 +440,11 @@ if __name__ == "__main__":
         for v in get_versions_list(scraper, args.versions_url):
             print(v)
         sys.exit(0)
-        
+
     if not args.url or not args.version or not args.output:
         parser.print_help(sys.stderr)
         sys.exit(1)
-        
+
     try:
         download_apkmirror(args.url, args.version, args.output, args.arch, args.dpi)
     except Exception as e:
