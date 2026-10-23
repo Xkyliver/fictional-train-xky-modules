@@ -770,7 +770,7 @@ build_rv() {
 		cp -a $MODULE_TEMPLATE_DIR/. "$base_template"
 		local upj="${table,,}-update.json"
 
-		module_config "$base_template" "$pkg_name" "$version" "$arch"
+		module_config "$base_template" "$pkg_name" "$version" "$arch" "${args[apkmirror_dlurl]:-}"
 
 		local patches_ver="${patches_jar##*-}"
 		module_prop \
@@ -785,28 +785,7 @@ build_rv() {
 		pr "Packing module ${table}"
 		cp -f "$patched_apk" "${base_template}/patched.apk"
 
-		if [ "${args[include_stock]}" != "disable" ]; then
-			mkdir -p "${base_template}/stock/"
-			if [ "${args[include_stock]}" = "merged" ]; then
-				cp -f "$stock_apk" "${base_template}/stock/stock.apk"
-			elif [ "${args[include_stock]}" = "split" ]; then
-				if [ ! -f "${stock_apk}.apkm" ]; then
-					epr "Cannot include as 'split' because stock apk of $table_name is not a bundle"
-					return 0
-				fi
-				if [ "$arch" = "arm64-v8a" ]; then
-					unzip -j "${stock_apk}.apkm" '*.apk' -x '*x86_64.apk' -x '*x86.apk' -x '*armeabi_v7a.apk' -d "${base_template}/stock/" >/dev/null 2>&1
-				elif [ "$arch" = "arm-v7a" ]; then
-					unzip -j "${stock_apk}.apkm" '*.apk' -x '*x86_64.apk' -x '*x86.apk' -x '*arm64_v8a.apk' -d "${base_template}/stock/" >/dev/null 2>&1
-				elif [ "$arch" = "x86" ]; then
-					unzip -j "${stock_apk}.apkm" '*.apk' -x '*x86_64.apk' -x '*arm64_v8a.apk' -x '*armeabi_v7a.apk' -d "${base_template}/stock/" >/dev/null 2>&1
-				elif [ "$arch" = "x86_64" ]; then
-					unzip -j "${stock_apk}.apkm" '*.apk' -x '*x86.apk' -x '*arm64_v8a.apk' -x '*armeabi_v7a.apk' -d "${base_template}/stock/" >/dev/null 2>&1
-				else
-					unzip -j "${stock_apk}.apkm" '*.apk' -x '*x86_64.apk' -x '*x86.apk' -d "${base_template}/stock/" >/dev/null 2>&1
-				fi
-			fi
-		fi
+
 
 		pushd >/dev/null "$base_template" || abort "Module template dir not found"
 		zip -"$COMPRESSION_LEVEL" -FSqr "${CWD}/${BUILD_DIR}/${module_output}" .
@@ -827,7 +806,10 @@ module_config() {
 	fi
 	echo "PKG_NAME=$2
 PKG_VER=$3
-MODULE_ARCH=$ma" >"$1/config"
+MODULE_ARCH=$ma
+APK_URL=${5:-}
+APK_VERSION=$3
+APK_ARCH=$4" >"$1/config"
 }
 module_prop() {
 	echo "id=${1}
