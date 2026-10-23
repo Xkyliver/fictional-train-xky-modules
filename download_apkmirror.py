@@ -264,7 +264,7 @@ def download_file(scraper, direct_url: str, referer: str, out_path: str):
                     f.write(chunk)
     print(f"Downloaded successfully: {out_path} ({os.path.getsize(out_path)} bytes)", file=sys.stderr)
 
-def download_apkmirror(base_url: str, version: str, output: str, arch: str = "all", dpi: str = ""):
+def download_apkmirror(base_url: str, version: str, output: str, arch: str = "all", dpi: str = "", get_url_only: bool = False):
     scraper = get_scraper()
 
     version_url, resp = find_version_page(scraper, base_url, version)
@@ -312,7 +312,6 @@ def download_apkmirror(base_url: str, version: str, output: str, arch: str = "al
                 "arch": variant_arch
             })
 
-    # Fallback: check all -apk-download links directly on page
     if not raw_variants:
         for a in soup.find_all("a", href=re.compile(r"-apk-download/?$")):
             href = a["href"].strip()
@@ -324,7 +323,6 @@ def download_apkmirror(base_url: str, version: str, output: str, arch: str = "al
                     "arch": "universal"
                 })
 
-    # If no variants in table, check if page itself has downloadButton
     if not raw_variants:
         dl_btn = soup.find("a", {"class": re.compile(r"downloadButton")})
         if dl_btn and dl_btn.get("href"):
@@ -340,7 +338,6 @@ def download_apkmirror(base_url: str, version: str, output: str, arch: str = "al
     if not raw_variants:
         raise Exception(f"No variants found for {version}")
 
-    # --- Filter by arch first, then sort by smallest file size ---
     target_arch = arch.lower() if arch else "all"
 
     def arch_matches(v: dict) -> bool:
@@ -354,7 +351,6 @@ def download_apkmirror(base_url: str, version: str, output: str, arch: str = "al
         print("  No variants matched requested arch, falling back to all variants", file=sys.stderr)
         arch_filtered = raw_variants
 
-    # Fetch file sizes for all arch-matching candidates
     print(f"Fetching sizes for {len(arch_filtered)} arch-matching variant(s)...", file=sys.stderr)
     sized_variants = []
     for v in arch_filtered:
@@ -362,11 +358,10 @@ def download_apkmirror(base_url: str, version: str, output: str, arch: str = "al
         print(f"  arch={v['arch']:20s}  bundle={v['is_bundle']}  size={sz:.1f} MB  url={v['url']}", file=sys.stderr)
         sized_variants.append((sz, v))
 
-    # Sort: smallest first; among equal sizes prefer non-bundle (simpler to handle)
-    sized_variants.sort(key=lambda x: (x[0], x[1]["is_bundle"]))
+    # Sort strictly by size to get the absolute smallest variant
+    sized_variants.sort(key=lambda x: x[0])
     ordered_variants = [v for _, v in sized_variants]
 
-    # --- Download loop (unchanged logic, now operating on size-sorted list) ---
     last_err = None
     for idx, selected in enumerate(ordered_variants):
         print(f"Trying variant {idx+1}/{len(ordered_variants)} (bundle={selected['is_bundle']}, arch={selected['arch']}): {selected['url']}", file=sys.stderr)
@@ -405,6 +400,10 @@ def download_apkmirror(base_url: str, version: str, output: str, arch: str = "al
             direct_href = direct_link["href"].strip()
             direct_url = "https://www.apkmirror.com" + direct_href if direct_href.startswith("/") else direct_href
 
+            if get_url_only:
+                print(direct_url)
+                return direct_url
+
             actual_output = output
             if selected["is_bundle"]:
                 if not actual_output.endswith(".apkm"):
@@ -429,6 +428,7 @@ if __name__ == "__main__":
     parser.add_argument("dpi", nargs="?", default="", help="Target DPI")
     parser.add_argument("--pkg-name", dest="pkg_url", help="Get package name for URL")
     parser.add_argument("--versions", dest="versions_url", help="Get version list for URL")
+    parser.add_argument("--get-url", action="store_true", help="Print direct download URL and exit")
 
     args = parser.parse_args()
     scraper = get_scraper()
@@ -441,12 +441,20 @@ if __name__ == "__main__":
             print(v)
         sys.exit(0)
 
-    if not args.url or not args.version or not args.output:
-        parser.print_help(sys.stderr)
-        sys.exit(1)
+    if args.get_url:
+        if not args.url or not args.version:
+            parser.print_help(sys.stderr)
+            sys.exit(1)
+    else:
+        if not args.url or not args.version or not args.output:
+            parser.print_help(sys.stderr)
+            sys.exit(1)
 
     try:
-        download_apkmirror(args.url, args.version, args.output, args.arch, args.dpi)
+        if args.get_url:
+            download_apkmirror(args.url, args.version, "dummy_output", args.arch, args.dpi, get_url_only=True)
+        else:
+            download_apkmirror(args.url, args.version, args.output, args.arch, args.dpi)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
