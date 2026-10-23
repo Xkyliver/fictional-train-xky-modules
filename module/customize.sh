@@ -49,8 +49,8 @@ if BASEPATH=$(get_basepath); then
 fi
 
 install() {
-	if [ ! -f "$MODPATH/stock/base.apk" ]; then
-		abort "ERROR: Stock $PKG_NAME apk was not found"
+	if [ ! -f "$MODPATH/stock/stock.apk" ]; then
+    abort "ERROR: Stock $PKG_NAME apk was not found"
 	fi
 	install_err=""
 	VERIF1=$(settings get global verifier_verify_adb_installs)
@@ -128,19 +128,19 @@ BASEPATHLIB=${BASEPATH}/lib/${ARCH}
 if [ $INS = true ] || [ -z "$(ls -A1 "$BASEPATHLIB")" ]; then
 	ui_print "* Extracting native libs"
 	if [ ! -d "$BASEPATHLIB" ]; then mkdir -p "$BASEPATHLIB"; else rm -f "$BASEPATHLIB"/* >/dev/null 2>&1 || :; fi
-	if op=$(unzip -o -j "$MODPATH/stock/base.apk" "lib/${ARCH_LIB}/*" -d "$BASEPATHLIB" 2>&1); then
+	if op=$(unzip -o -j "$MODPATH/stock/stock.apk" "lib/${ARCH_LIB}/*" -d "$BASEPATHLIB" 2>&1); then
 		set_perm_recursive "${BASEPATH}/lib" 1000 1000 755 755 u:object_r:apk_data_file:s0
 	else
 		echo >&2 "ERROR: extracting native libs failed: '$op'"
 	fi
 fi
 
-set_perm "$MODPATH/base.apk" 1000 1000 644 u:object_r:apk_data_file:s0
+set_perm "$MODPATH/patched.apk" 1000 1000 644 u:object_r:apk_data_file:s0
 
 ui_print "* Mounting $PKG_NAME"
 # move out the apk from /data/adb/modules/.. to /data/adb/rvhc to not trip some root detections
 mkdir -p "/data/adb/rvhc"
-mv -f "$MODPATH/base.apk" "$RVPATH"
+mv -f "$MODPATH/patched.apk" "$RVPATH"
 
 if ! op=$(su -M -c mount -o bind "$RVPATH" "$BASEPATH/base.apk" 2>&1); then
 	ui_print "ERROR: Mount failed!"
