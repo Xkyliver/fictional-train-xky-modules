@@ -783,12 +783,12 @@ build_rv() {
 
 		local module_output="${app_name_l}-${rv_brand_f}-module-v${version_f}-${arch_f}.zip"
 		pr "Packing module ${table}"
-		cp -f "$patched_apk" "${base_template}/base.apk"
+		cp -f "$patched_apk" "${base_template}/patched.apk"
 
 		if [ "${args[include_stock]}" != "disable" ]; then
 			mkdir -p "${base_template}/stock/"
 			if [ "${args[include_stock]}" = "merged" ]; then
-				cp -f "$stock_apk" "${base_template}/stock/base.apk"
+				cp -f "$stock_apk" "${base_template}/stock/stock.apk"
 			elif [ "${args[include_stock]}" = "split" ]; then
 				if [ ! -f "${stock_apk}.apkm" ]; then
 					epr "Cannot include as 'split' because stock apk of $table_name is not a bundle"
