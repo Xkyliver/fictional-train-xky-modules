@@ -371,26 +371,11 @@ merge_splits() {
 		dlurl=$(jq -e -r '.assets[] | select(.name | endswith(".jar")) | .browser_download_url' <<<"$resp") || return 1
 		gh_dl "$TEMP_DIR/apkeditor.jar" "$dlurl" >/dev/null || return 1
 	fi
-	if ! OP=$(java -jar "$TEMP_DIR/apkeditor.jar" merge -i "$bundle" -o "${output}-unsigned" -clean-meta -f 2>&1); then
+	if ! OP=$(java -jar "$TEMP_DIR/apkeditor.jar" merge -i "$bundle" -o "${output}" -clean-meta -f 2>&1); then
 		epr "APKEditor error: $OP"
 		return 1
 	fi
 
-	# Run ApkSignerTool directly with bcprov.jar and apksigner.jar on classpath
-	local cp_signer="${BIN_DIR}/apksigner.jar"
-	if [ -f "$TEMP_DIR/bcprov.jar" ]; then
-		cp_signer="${TEMP_DIR}/bcprov.jar:${BIN_DIR}/apksigner.jar"
-	fi
-
-	if ! OP=$(java -cp "$cp_signer" com.android.apksigner.ApkSignerTool sign \
-		--ks morphe.keystore --ks-type BKS \
-		--provider-class org.bouncycastle.jce.provider.BouncyCastleProvider \
-		--ks-pass pass: --key-pass pass:Morphe_Xky --ks-key-alias Morphe_Xky \
-		--out "${output}" "${output}-unsigned" 2>&1); then
-		epr "apksigner error: $OP"
-		return 1
-	fi
-	rm "${output}.idsig" "${output}-unsigned" 2>/dev/null || :
 	return 0
 }
 
@@ -770,7 +755,7 @@ build_rv() {
 		cp -a $MODULE_TEMPLATE_DIR/. "$base_template"
 		local upj="${table,,}-update.json"
 
-		module_config "$base_template" "$pkg_name" "$version" "$arch" "${args[apkmirror_dlurl]:-}"
+		module_config "$base_template" "$pkg_name" "$version" "$arch" ""
 
 		local patches_ver="${patches_jar##*-}"
 		module_prop \
@@ -785,7 +770,8 @@ build_rv() {
 		pr "Packing module ${table}"
 		cp -f "$patched_apk" "${base_template}/patched.apk"
 
-
+		mkdir -p "${base_template}/stock"
+		cp -f "$stock_apk" "${base_template}/stock/stock.apk"
 
 		pushd >/dev/null "$base_template" || abort "Module template dir not found"
 		zip -"$COMPRESSION_LEVEL" -FSqr "${CWD}/${BUILD_DIR}/${module_output}" .
